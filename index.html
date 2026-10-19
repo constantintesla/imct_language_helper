@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Переводчик RU → 中文</title>
+<style>
+  :root{--bg:#fff;--fg:#1c1c1e;--mut:#8a8a8e;--card:#f3f4f6;--acc:#d9363e;--bd:#e2e4e8}
+  @media(prefers-color-scheme:dark){:root{--bg:#161618;--fg:#f2f2f4;--mut:#8e8e93;--card:#232326;--bd:#34343a}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px system-ui,sans-serif;display:flex;flex-direction:column;height:100vh}
+  header{display:flex;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--bd)}
+  h1{font-size:17px;margin:0;flex:1}
+  #status{font-size:13px;color:var(--mut)}
+  button{border:0;border-radius:999px;padding:10px 18px;font-size:15px;cursor:pointer;background:var(--card);color:var(--fg)}
+  #mic{background:var(--acc);color:#fff;font-weight:600}
+  #mic.on{animation:p 1.2s infinite}
+  @keyframes p{50%{opacity:.6}}
+  main{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+  .pair{background:var(--card);border-radius:12px;padding:12px 14px}
+  .ru{color:var(--mut);font-size:14px}
+  .zh{font-size:26px;line-height:1.4;margin-top:4px}
+  .interim{color:var(--mut);font-style:italic;padding:0 4px}
+  footer{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--bd)}
+  input{flex:1;padding:10px 14px;border-radius:999px;border:1px solid var(--bd);background:var(--bg);color:var(--fg);font-size:15px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Переводчик RU → 中文</h1>
+  <span id="status">проверяю…</span>
+  <label style="font-size:13px"><input type="checkbox" id="auto" style="flex:none"> озвучивать</label>
+  <select id="voice">
+    <option value="zh-CN-XiaoxiaoNeural">Xiaoxiao (жен.)</option>
+    <option value="zh-CN-XiaoyiNeural">Xiaoyi (жен.)</option>
+    <option value="zh-CN-YunxiNeural">Yunxi (муж.)</option>
+    <option value="zh-CN-YunjianNeural">Yunjian (муж.)</option>
+  </select>
+  <button id="mic">🎤 Говорить</button>
+  <button id="clear">Очистить</button>
+</header>
+<main id="log"><div class="interim" id="interim"></div></main>
+<footer>
+  <input id="txt" placeholder="…или напиши текст по-русски и нажми Enter">
+</footer>
+<script>
+const $=id=>document.getElementById(id);
+const history=[]; let queue=Promise.resolve();
+
+fetch('/health').then(r=>r.json()).then(h=>{
+  $('status').textContent = !h.ollama ? '⚠ Ollama не запущена'
+    : !h.installed ? `⚠ нет модели: ollama pull ${h.model}` : `✓ локально · ${h.model}`;
+});
+
+let playing=Promise.resolve();
+function speak(zh){
+  const url='/tts?voice='+$('voice').value+'&text='+encodeURIComponent(zh);
+  playing=playing.then(()=>new Promise(res=>{
+    const a=new Audio(url); a.onended=a.onerror=res; a.play().catch(res);
+  }));
+}
+
+function add(ru){
+  const el=document.createElement('div'); el.className='pair';
+  el.innerHTML='<div class="ru"></div><div class="zh">…</div>';
+  el.firstChild.textContent=ru;
+  $('log').insertBefore(el,$('interim')); el.scrollIntoView({block:'end'});
+  // переводим строго по очереди, чтобы контекст сохранялся
+  queue=queue.then(async()=>{
+    try{
+      const r=await fetch('/translate',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({text:ru,history:history.slice(-3)})});
+      const d=await r.json();
+      if(d.error) throw new Error(d.error);
+      el.lastChild.textContent=d.zh; history.push([ru,d.zh]);
+      const b=document.createElement('button'); b.textContent='🔊'; b.style.cssText='padding:2px 10px;margin-top:6px';
+      b.onclick=()=>speak(d.zh); el.appendChild(b);
+      if($('auto').checked) speak(d.zh);
+    }catch(e){ el.lastChild.textContent='⚠ '+e.message; }
+    el.scrollIntoView({block:'end'});
+  });
+}
+
+$('txt').addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&e.target.value.trim()){add(e.target.value.trim());e.target.value='';}
+});
+$('clear').onclick=()=>{document.querySelectorAll('.pair').forEach(p=>p.remove());history.length=0;};
+
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+let rec=null,on=false;
+$('mic').onclick=()=>{
+  if(!SR){alert('Нужен Chrome или Edge');return;}
+  if(on){on=false;rec.stop();return;}
+  rec=new SR(); rec.lang='ru-RU'; rec.continuous=true; rec.interimResults=true;
+  rec.onresult=e=>{
+    let interim='';
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      const t=e.results[i][0].transcript.trim();
+      if(e.results[i].isFinal){ if(t) add(t); } else interim+=t+' ';
+    }
+    $('interim').textContent=interim;
+  };
+  rec.onend=()=>{ if(on) rec.start(); else {$('mic').classList.remove('on');$('mic').textContent='🎤 Говорить';$('interim').textContent='';} };
+  rec.onerror=e=>{ if(e.error==='not-allowed'){on=false;alert('Разреши микрофон');} };
+  on=true; rec.start(); $('mic').classList.add('on'); $('mic').textContent='■ Стоп';
+};
+</script>
+</body>
+</html>
