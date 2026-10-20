@@ -21,7 +21,8 @@ from certs import ensure_cert, lan_ips
 
 LMSTUDIO = os.environ.get("LMSTUDIO", "http://localhost:1234/v1")
 MODEL = os.environ.get("MODEL", "qwen/qwen3.5-35b-a3b")
-WHISPER = os.environ.get("WHISPER", "large-v3-turbo")
+WHISPER = os.environ.get("WHISPER", "large-v3-turbo")        # русский
+WHISPER_ZH = os.environ.get("WHISPER_ZH", "large-v3")         # китайский: полная модель заметно точнее turbo
 PORT = int(os.environ.get("PORT", "8443"))
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -67,19 +68,20 @@ def collapse_repeats(text):
 
 
 app = FastAPI()
-_stt = _tts = _tts_ru = None
+_stt = {}
+_tts = _tts_ru = None
 _stt_lock, _tts_lock, _load_lock = threading.Lock(), threading.Lock(), threading.Lock()
 _tts_cache = {}
 CA_PATH = None
 
 
-def get_stt():
-    global _stt
+def get_stt(lang="ru"):
+    name = WHISPER_ZH if lang == "zh" else WHISPER
     with _load_lock:
-        if _stt is None:
+        if name not in _stt:
             from faster_whisper import WhisperModel
-            _stt = WhisperModel(WHISPER, device="cuda", compute_type="float16")
-    return _stt
+            _stt[name] = WhisperModel(name, device="cuda", compute_type="float16")
+    return _stt[name]
 
 
 def get_tts():
@@ -127,7 +129,14 @@ async def stt(request: Request, dir: str = "ru2zh"):
 
     def run():
         with _stt_lock:
-            segs, _ = get_stt().transcribe(
+            model = get_stt(lang)
+            # язык по звуку: чужую речь (в т.ч. собственную озвучку из динамиков) отбрасываем
+            probs = dict(model.detect_language(pcm, vad_filter=True)[2])
+            p_src, p_other = probs.get(lang, 0.0), probs.get("zh" if lang == "ru" else "ru", 0.0)
+            if p_src < p_other:
+                print(f"STT[{lang}] пропущено: язык {lang}={p_src:.2f} < другой={p_other:.2f}", flush=True)
+                return ""
+            segs, _ = model.transcribe(
                 pcm, language=lang, beam_size=5, vad_filter=True,
                 vad_parameters={"min_silence_duration_ms": 500, "speech_pad_ms": 300},
                 temperature=[0.0, 0.2, 0.4, 0.6], compression_ratio_threshold=2.0, log_prob_threshold=-1.0,
@@ -189,7 +198,7 @@ async def tts(text: str, voice: str, lang: str = "zh"):
 
 @app.get("/health")
 async def health():
-    out = {"model": MODEL, "voices": VOICES, "stt": WHISPER, "dst": DST_LANG}
+    out = {"model": MODEL, "voices": VOICES, "stt": WHISPER, "stt_zh": WHISPER_ZH, "dst": DST_LANG}
     try:
         async with httpx.AsyncClient(timeout=3) as c:
             ids = [m["id"] for m in (await c.get(LMSTUDIO + "/models")).json()["data"]]
@@ -205,7 +214,7 @@ if __name__ == "__main__":
     t = time.time()
     get_tts(); get_tts_ru()
     for lg in ("ru", "zh"):
-        get_stt().transcribe(np.zeros(16000, dtype=np.float32), language=lg)
+        get_stt(lg).transcribe(np.zeros(16000, dtype=np.float32), language=lg)
     print(f"Готово за {time.time() - t:.0f} с. LLM: {MODEL} @ {LMSTUDIO}")
     print(f"Открой: https://localhost:{PORT}")
     for ip in lan_ips():

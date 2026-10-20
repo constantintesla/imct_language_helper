@@ -70,7 +70,8 @@ docker compose down       # остановить
 |---|---|---|
 | `MODEL` | `qwen/qwen3.5-35b-a3b` | id модели в LM Studio (список: `http://localhost:1234/v1/models`) |
 | `LMSTUDIO` | `http://localhost:1234/v1` | адрес API LM Studio |
-| `WHISPER` | `large-v3-turbo` | модель faster-whisper |
+| `WHISPER` | `large-v3-turbo` | модель faster-whisper для русского |
+| `WHISPER_ZH` | `large-v3` | модель faster-whisper для китайского (точнее turbo) |
 | `PORT` | `8443` | порт HTTPS |
 | `OFFLINE` | — | `1` — не обращаться к Hugging Face |
 

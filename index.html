@@ -65,11 +65,13 @@ $('dir').onchange=()=>{ lsSet('dir',$('dir').value); history.length=0; if(HEALTH
   $('txt').placeholder=$('dir').value==='ru2zh'?'…или напиши текст по-русски и нажми Enter':'…或者用中文输入，然后按 Enter'; };
 
 // ---------- озвучка (Kokoro / Silero на сервере) ----------
-let playing=Promise.resolve();
+let playing=Promise.resolve(), muteUntil=0;
+const muted=()=>Date.now()<muteUntil;
 function speak(text,lang,voice){
   const url='/tts?lang='+lang+'&voice='+voice+'&text='+encodeURIComponent(text);
   playing=playing.then(()=>new Promise(res=>{
-    const a=new Audio(url); a.onended=a.onerror=res; a.play().catch(res);
+    const a=new Audio(url); muteUntil=Date.now()+86400000;
+    const done=()=>{ muteUntil=Date.now()+600; res(); }; a.onended=a.onerror=done; a.play().catch(done);
   }));
 }
 
@@ -130,6 +132,7 @@ function stopMic(){
   $('mic').classList.remove('on'); $('mic').textContent='🎤 Говорить'; $('interim').textContent=''; $('meter').firstChild.style.width='0';
 }
 function onChunk(c){
+  if(muted()){ if(st.speaking||st.chunks.length){ const n=st.noise; resetSeg(); st.noise=n; $('interim').textContent=''; } $('meter').firstChild.style.width='0'; return; }
   let s=0; for(let i=0;i<c.length;i++) s+=c[i]*c[i];
   const rms=Math.sqrt(s/c.length), dt=c.length/RATE;
   const thr=Math.max(0.012,st.noise*3.5);

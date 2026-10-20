@@ -8,6 +8,7 @@ services:
       LMSTUDIO: ${LMSTUDIO:-http://host.docker.internal:1234/v1}
       MODEL: ${MODEL:-qwen/qwen3.5-35b-a3b}
       WHISPER: ${WHISPER:-large-v3-turbo}
+      WHISPER_ZH: ${WHISPER_ZH:-large-v3}
       # адрес/имя хоста для сертификата (внутри контейнера свой IP не подходит); run-docker.ps1 заполняет автоматически
       LAN_IPS: ${LAN_IPS:-}
       HOST_NAME: ${HOST_NAME:-}
