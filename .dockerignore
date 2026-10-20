@@ -1,0 +1,7 @@
+.venv
+.git
+certs
+__pycache__
+*.log
+*.wav
+models

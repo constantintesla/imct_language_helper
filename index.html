@@ -3,107 +3,169 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Переводчик RU → 中文</title>
+<title>Переводчик RU ⇄ 中文</title>
 <style>
   :root{--bg:#fff;--fg:#1c1c1e;--mut:#8a8a8e;--card:#f3f4f6;--acc:#d9363e;--bd:#e2e4e8}
   @media(prefers-color-scheme:dark){:root{--bg:#161618;--fg:#f2f2f4;--mut:#8e8e93;--card:#232326;--bd:#34343a}}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);font:16px system-ui,sans-serif;display:flex;flex-direction:column;height:100vh}
-  header{display:flex;gap:12px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--bd)}
-  h1{font-size:17px;margin:0;flex:1}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px system-ui,sans-serif;display:flex;flex-direction:column;height:100vh;height:100dvh}
+  header{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:12px 16px;border-bottom:1px solid var(--bd)}
+  h1{font-size:17px;margin:0;flex:1;white-space:nowrap}
   #status{font-size:13px;color:var(--mut)}
-  button{border:0;border-radius:999px;padding:10px 18px;font-size:15px;cursor:pointer;background:var(--card);color:var(--fg)}
+  button,select{border:0;border-radius:999px;padding:10px 18px;font-size:15px;cursor:pointer;background:var(--card);color:var(--fg)}
   #mic{background:var(--acc);color:#fff;font-weight:600}
   #mic.on{animation:p 1.2s infinite}
   @keyframes p{50%{opacity:.6}}
+  #meter{width:60px;height:8px;background:var(--card);border-radius:4px;overflow:hidden}
+  #meter i{display:block;height:100%;width:0;background:var(--acc)}
   main{flex:1;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
   .pair{background:var(--card);border-radius:12px;padding:12px 14px}
   .ru{color:var(--mut);font-size:14px}
   .zh{font-size:26px;line-height:1.4;margin-top:4px}
   .interim{color:var(--mut);font-style:italic;padding:0 4px}
   footer{display:flex;gap:8px;padding:12px 16px;border-top:1px solid var(--bd)}
-  input{flex:1;padding:10px 14px;border-radius:999px;border:1px solid var(--bd);background:var(--bg);color:var(--fg);font-size:15px}
+  input[type=text]{flex:1;padding:10px 14px;border-radius:999px;border:1px solid var(--bd);background:var(--bg);color:var(--fg);font-size:15px}
 </style>
 </head>
 <body>
 <header>
-  <h1>Переводчик RU → 中文</h1>
+  <h1>Переводчик RU ⇄ 中文</h1>
   <span id="status">проверяю…</span>
-  <label style="font-size:13px"><input type="checkbox" id="auto" style="flex:none"> озвучивать</label>
-  <select id="voice">
-    <option value="zh-CN-XiaoxiaoNeural">Xiaoxiao (жен.)</option>
-    <option value="zh-CN-XiaoyiNeural">Xiaoyi (жен.)</option>
-    <option value="zh-CN-YunxiNeural">Yunxi (муж.)</option>
-    <option value="zh-CN-YunjianNeural">Yunjian (муж.)</option>
-  </select>
+  <label style="font-size:13px"><input type="checkbox" id="auto" checked> озвучивать</label>
+  <select id="dir"><option value="ru2zh">RU → 中文</option><option value="zh2ru">中文 → RU</option></select>
+  <select id="voice"></select>
+  <span id="meter" title="уровень микрофона"><i></i></span>
   <button id="mic">🎤 Говорить</button>
   <button id="clear">Очистить</button>
 </header>
 <main id="log"><div class="interim" id="interim"></div></main>
 <footer>
-  <input id="txt" placeholder="…или напиши текст по-русски и нажми Enter">
+  <input type="text" id="txt" placeholder="…или напиши текст по-русски и нажми Enter">
 </footer>
 <script>
 const $=id=>document.getElementById(id);
-const history=[]; let queue=Promise.resolve();
+const history=[]; let queue=Promise.resolve(), HEALTH=null;
+const DST={ru2zh:'zh',zh2ru:'ru'};
+const lsGet=k=>{try{return localStorage[k]}catch{}}, lsSet=(k,v)=>{try{localStorage[k]=v}catch{}};
 
+function fillVoices(){
+  const lang=DST[$('dir').value], v=HEALTH.voices[lang];
+  $('voice').innerHTML=Object.entries(v).map(([k,n])=>`<option value="${k}">${n}</option>`).join('');
+  const saved=lsGet('voice_'+lang); if(saved&&v[saved]) $('voice').value=saved;
+}
 fetch('/health').then(r=>r.json()).then(h=>{
-  $('status').textContent = !h.ollama ? '⚠ Ollama не запущена'
-    : !h.installed ? `⚠ нет модели: ollama pull ${h.model}` : `✓ локально · ${h.model}`;
+  HEALTH=h;
+  $('status').textContent = !h.llm ? '⚠ LM Studio не запущен'
+    : !h.installed ? `⚠ в LM Studio нет модели ${h.model}` : `✓ всё локально · ${h.model}`;
+  if(lsGet('dir')) $('dir').value=lsGet('dir');
+  fillVoices();
 });
+$('voice').onchange=()=>lsSet('voice_'+DST[$('dir').value],$('voice').value);
+$('dir').onchange=()=>{ lsSet('dir',$('dir').value); history.length=0; if(HEALTH) fillVoices();
+  $('txt').placeholder=$('dir').value==='ru2zh'?'…или напиши текст по-русски и нажми Enter':'…或者用中文输入，然后按 Enter'; };
 
+// ---------- озвучка (Kokoro / Silero на сервере) ----------
 let playing=Promise.resolve();
-function speak(zh){
-  const url='/tts?voice='+$('voice').value+'&text='+encodeURIComponent(zh);
+function speak(text,lang,voice){
+  const url='/tts?lang='+lang+'&voice='+voice+'&text='+encodeURIComponent(text);
   playing=playing.then(()=>new Promise(res=>{
     const a=new Audio(url); a.onended=a.onerror=res; a.play().catch(res);
   }));
 }
 
-function add(ru){
+// ---------- перевод ----------
+function add(src){
+  const dir=$('dir').value, lang=DST[dir], voice=$('voice').value;
   const el=document.createElement('div'); el.className='pair';
   el.innerHTML='<div class="ru"></div><div class="zh">…</div>';
-  el.firstChild.textContent=ru;
+  el.firstChild.textContent=src;
   $('log').insertBefore(el,$('interim')); el.scrollIntoView({block:'end'});
-  // переводим строго по очереди, чтобы контекст сохранялся
-  queue=queue.then(async()=>{
+  queue=queue.then(async()=>{   // строго по очереди — контекст сохраняется
     try{
+      if(dir!==$('dir').value) throw new Error('направление переключено');
       const r=await fetch('/translate',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({text:ru,history:history.slice(-3)})});
+        body:JSON.stringify({text:src,dir,history:history.slice(-3)})});
       const d=await r.json();
       if(d.error) throw new Error(d.error);
-      el.lastChild.textContent=d.zh; history.push([ru,d.zh]);
+      el.lastChild.textContent=d.text; history.push([src,d.text]);
       const b=document.createElement('button'); b.textContent='🔊'; b.style.cssText='padding:2px 10px;margin-top:6px';
-      b.onclick=()=>speak(d.zh); el.appendChild(b);
-      if($('auto').checked) speak(d.zh);
+      b.onclick=()=>speak(d.text,lang,voice); el.appendChild(b);
+      if($('auto').checked) speak(d.text,lang,voice);
     }catch(e){ el.lastChild.textContent='⚠ '+e.message; }
     el.scrollIntoView({block:'end'});
   });
 }
-
 $('txt').addEventListener('keydown',e=>{
   if(e.key==='Enter'&&e.target.value.trim()){add(e.target.value.trim());e.target.value='';}
 });
 $('clear').onclick=()=>{document.querySelectorAll('.pair').forEach(p=>p.remove());history.length=0;};
 
-const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-let rec=null,on=false;
-$('mic').onclick=()=>{
-  if(!SR){alert('Нужен Chrome или Edge');return;}
-  if(on){on=false;rec.stop();return;}
-  rec=new SR(); rec.lang='ru-RU'; rec.continuous=true; rec.interimResults=true;
-  rec.onresult=e=>{
-    let interim='';
-    for(let i=e.resultIndex;i<e.results.length;i++){
-      const t=e.results[i][0].transcript.trim();
-      if(e.results[i].isFinal){ if(t) add(t); } else interim+=t+' ';
-    }
-    $('interim').textContent=interim;
-  };
-  rec.onend=()=>{ if(on) rec.start(); else {$('mic').classList.remove('on');$('mic').textContent='🎤 Говорить';$('interim').textContent='';} };
-  rec.onerror=e=>{ if(e.error==='not-allowed'){on=false;alert('Разреши микрофон');} };
-  on=true; rec.start(); $('mic').classList.add('on'); $('mic').textContent='■ Стоп';
-};
+// ---------- микрофон: запись + определение пауз в браузере, распознавание (Whisper) на сервере ----------
+const RATE=16000, PREROLL=0.35, END_SIL=0.8, MIN_SPEECH=0.3, MAX_SEG=25;
+let ctx=null, stream=null, node=null, on=false;
+let st; function resetSeg(){ st={speaking:false,chunks:[],pre:[],len:0,sil:0,speech:0,noise:0.005}; }
+
+const WORKLET=`class R extends AudioWorkletProcessor{process(i){const c=i[0][0];if(c)this.port.postMessage(c.slice());return true}}registerProcessor('rec',R)`;
+
+async function startMic(){
+  if(!navigator.mediaDevices?.getUserMedia){
+    alert('Браузер не даёт доступ к микрофону: страница должна быть открыта по HTTPS (https://…:8443) или с localhost.');
+    return;
+  }
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+  }catch(e){ alert('Нет доступа к микрофону: '+e.message); return; }
+  ctx=new AudioContext({sampleRate:RATE});
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET],{type:'text/javascript'})));
+  node=new AudioWorkletNode(ctx,'rec');
+  ctx.createMediaStreamSource(stream).connect(node);
+  resetSeg();
+  node.port.onmessage=e=>onChunk(e.data);
+  on=true; $('mic').classList.add('on'); $('mic').textContent='■ Стоп';
+}
+function stopMic(){
+  on=false;
+  if(st.speaking&&st.speech>=MIN_SPEECH) flush();
+  stream?.getTracks().forEach(t=>t.stop()); ctx?.close(); node=ctx=stream=null;
+  $('mic').classList.remove('on'); $('mic').textContent='🎤 Говорить'; $('interim').textContent=''; $('meter').firstChild.style.width='0';
+}
+function onChunk(c){
+  let s=0; for(let i=0;i<c.length;i++) s+=c[i]*c[i];
+  const rms=Math.sqrt(s/c.length), dt=c.length/RATE;
+  const thr=Math.max(0.012,st.noise*3.5);
+  const loud=rms>thr;
+  $('meter').firstChild.style.width=Math.min(100,rms*600)+'%';
+  if(!st.speaking){
+    if(!loud) st.noise=st.noise*0.97+rms*0.03;      // подстройка под фоновый шум
+    st.pre.push(c); st.len+=c.length;
+    while(st.len>PREROLL*RATE&&st.pre.length>1){ st.len-=st.pre.shift().length; }
+    if(loud){ st.speaking=true; st.chunks=st.pre; st.pre=[]; st.sil=0; st.speech=dt; $('interim').textContent='🎙 слушаю…'; }
+    return;
+  }
+  st.chunks.push(c);
+  if(loud){ st.sil=0; st.speech+=dt; } else st.sil+=dt;
+  const total=st.chunks.reduce((a,x)=>a+x.length,0)/RATE;
+  if(st.sil>=END_SIL||total>=MAX_SEG){
+    if(st.speech>=MIN_SPEECH) flush(); else { st.speaking=false; st.chunks=[]; $('interim').textContent=''; }
+  }
+}
+function flush(){
+  const dir=$('dir').value;
+  const chunks=st.chunks, n=chunks.reduce((a,x)=>a+x.length,0), pcm=new Int16Array(n); let o=0;
+  for(const c of chunks) for(let i=0;i<c.length;i++) pcm[o++]=Math.max(-1,Math.min(1,c[i]))*32767;
+  const noise=st.noise; resetSeg(); st.noise=noise;
+  $('interim').textContent='… распознаю';
+  sttQueue=sttQueue.then(async()=>{
+    try{
+      const r=await fetch('/stt?dir='+dir,{method:'POST',body:pcm.buffer});
+      const {text}=await r.json();
+      if(text) add(text);
+    }catch(e){ console.error(e); }
+    $('interim').textContent=on&&st.speaking?'🎙 слушаю…':'';
+  });
+}
+let sttQueue=Promise.resolve();
+$('mic').onclick=()=>on?stopMic():startMic();
 </script>
 </body>
 </html>

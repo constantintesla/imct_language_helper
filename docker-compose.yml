@@ -1,0 +1,28 @@
+services:
+  translator:
+    build: .
+    ports:
+      - "8443:8443"
+    environment:
+      # LM Studio работает на хосте
+      LMSTUDIO: ${LMSTUDIO:-http://host.docker.internal:1234/v1}
+      MODEL: ${MODEL:-qwen/qwen3.5-35b-a3b}
+      WHISPER: ${WHISPER:-large-v3-turbo}
+      # адрес/имя хоста для сертификата (внутри контейнера свой IP не подходит); run-docker.ps1 заполняет автоматически
+      LAN_IPS: ${LAN_IPS:-}
+      HOST_NAME: ${HOST_NAME:-}
+      OFFLINE: ${OFFLINE:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./certs:/app/certs      # CA и сертификат сохраняются между запусками
+      - ./models:/models        # веса: ESpeech (Санек) + кэш Whisper/Kokoro/RUAccent
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
